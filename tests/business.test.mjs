@@ -54,12 +54,22 @@ test('不同所选对象的服务端模型请求携带不同证据包',async()=>
  };
  try{
   for(const scope of ['AP012','G1','COMPARE']){
-   const request=new Request('https://example.com/api/analyze',{method:'POST',headers:{'X-Demo-Passcode':'demo'},body:JSON.stringify({period:'2026-11',scope,prompt:'这项业务有什么需要注意？'})});
-   const r=await onRequestPost({request,env:{AI_ENABLED:'1',AI_API_KEY:'secret',AI_MODEL:'test',AI_DEMO_PASSCODE:'demo',AI_BASE_URL:'https://model.example/v1'}});
+   const request=new Request('https://example.com/api/analyze',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({period:'2026-11',scope,prompt:'这项业务有什么需要注意？'})});
+   const r=await onRequestPost({request,env:{AI_ENABLED:'1',AI_API_KEY:'secret',AI_MODEL:'test',AI_BASE_URL:'https://model.example/v1'}});
    assert.equal(r.status,200);const out=await r.json();assert.equal(out.scope,scope);
   }
   assert.deepEqual(seen.map(x=>x.requestedScope),['AP012','G1','COMPARE']);
   assert.ok(seen[0].canonicalFacts.some(x=>x.text.includes('AP012')));
   assert.ok(!seen[1].canonicalFacts.some(x=>x.text.includes('AP012')));
  }finally{globalThis.fetch=old;}
+});
+
+test('无需额外口令即可使用已配置的分析服务',async()=>{
+ const r=onRequestGet({env:{AI_ENABLED:'1',AI_MODEL:'test',AI_API_KEY:'key'}});
+ assert.equal((await r.json()).available,true);
+});
+test('禁止来自其他站点的浏览器直接提交模型请求',async()=>{
+ const request=new Request('https://site.example/api/analyze',{method:'POST',headers:{Origin:'https://evil.example','Content-Type':'application/json'},body:JSON.stringify({scope:'L-001',period:'2026-11',prompt:'请解释这项业务为何需要协调？'})});
+ const response=await onRequestPost({request,env:{AI_ENABLED:'1',AI_API_KEY:'key',AI_MODEL:'test'}});
+ assert.equal(response.status,403);
 });
