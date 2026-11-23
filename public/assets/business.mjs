@@ -109,3 +109,79 @@ export function caseEvidence(caseId='L-001',period='2026-11'){
  const g=snap.groups.find(x=>x.id==='G2');
  return {caseId,topic:leadershipCase.title,facts:[`广域建材控股已确认归并应付${g.balance}万元，其中逾期${g.overdue}万元。`,`AP003原始应付900万元，截至${snap.cutoff}已核销220万元、未清680万元；AP004原始应付400万元、已核销50万元、未清350万元。`,'AP003登记争议90万元，但不直接扣减正式应付。','广域物资有限公司S04的集团关系待核，其应付金额没有进入G2已确认归并。'],evidenceIds:['E-C01','E-C02','E-P03','E-P04','E-A04','E-D03','E-G02'],openQuestions:['争议90万元的处理状态及正式依据是什么？','付款安排与集团资金计划是否协调？','是否需要明确归口部门会商及反馈期限？'],decisionScope:leadershipCase.question,cutoff:snap.cutoff};
 }
+
+// Evidence is derived from the selected accounting object and the selected snapshot.
+// It is a structured sample-data index, not scanned contracts or verified enterprise attachments.
+export function evidenceCatalog(period='2026-11'){
+ const s=snapshot(period);
+ const catalog={...evidenceIndex};
+ for(const r of s.entries){
+  catalog[`E-AP-${r.id}`]={type:'财务应付记录',label:`${r.id} · 应付与余额`,description:`供应商：${r.supplier.name}；业务主体：${r.supplier.payer}；原始应付${r.amount}万元；截至${s.cutoff}核销${r.paid}万元，剩余${r.balance}万元。`,sourceId:r.id};
+  catalog[`E-CT-${r.id}`]={type:'合同付款字段',label:`${r.contract} · 付款节点`,description:`对应结算${r.settlement}；登记到期日：${r.due||'缺失'}；付款条件：${r.supplier.terms}。本环境未保存合同原件，不可据此确认合同解释。`,sourceId:r.contract};
+  if(r.dispute){catalog[`E-DIS-${r.id}`]={type:'争议登记',label:`${r.id} · 争议情况`,description:`登记争议${r.dispute}万元；未提供正式账务调整凭证，因此未从应付余额中扣减。`,sourceId:r.id};}
+  for(const a of r.applied){
+   catalog[`E-ALLOC-${r.id}-${a.paymentId}`]={type:'付款核销分配',label:`${a.paymentId} → ${r.id}`,description:`实际支付日期${a.payment.date}；付款记录${a.paymentId}分配至${r.id} ${a.amount}万元。`,sourceId:`${a.paymentId}/${r.id}`};
+  }
+ }
+ for(const g of s.groups){
+  catalog[`E-GROUP-${g.id}`]={type:'供应商关系及归并',label:`${g.name} · 归并范围`,description:`已确认归属的供应商：${[...new Set(g.items.map(r=>r.supplier.name))].join('、')}；应付${g.balance}万元；逾期${g.overdue}万元。未知映射不参与本组汇总。`,sourceId:g.id};
+ }
+ return catalog;
+}
+const round1=n=>Number(n.toFixed(1));
+export function analysisScopes(period='2026-11'){
+ const s=snapshot(period);
+ const list=[{type:'issue',id:'L-001',label:'广域建材 · 集团协调议题',tier:'集团已提出议题（样例）'}];
+ for(const g of s.groups.filter(g=>g.balance>0))list.push({type:'group',id:g.id,label:g.name,tier:'集团供应商分析'});
+ for(const r of s.entries.filter(r=>r.balance>0))list.push({type:'payable',id:r.id,label:`${r.supplier.name} · ${r.id}`,tier:'单笔业务依据'});
+ list.push({type:'comparison',id:'COMPARE',label:'同类供应商付款情况',tier:'业务核查专题'});
+ return list;
+}
+export function analysisContext(scope='L-001',period='2026-11'){
+ const s=snapshot(period),catalog=evidenceCatalog(period);let title='',management='',openQuestions=[],options=[],owner='',tier='部门核查资料',items=[];
+ const facts=[];
+ const fact=(text,ids)=>{
+  let source_ids=[...new Set(ids)].filter(id=>catalog[id]);
+  if(!source_ids.length)throw Error('a canonical fact needs a known source');
+  facts.push({id:`F${String(facts.length+1).padStart(2,'0')}`,text,source_ids});
+ };
+ const general='集团领导只讨论已经确认且明确需要集团协调的事项；业务异常不得自动提级。';
+ if(scope==='L-001'){
+  const g=s.groups.find(x=>x.id==='G2');if(!g)throw Error('not found');
+  title='广域建材到期款及争议协调';tier='集团协调议题（情境预设）';owner='集团财资与供应链';
+  management='需要管理层确认是否要求财资、供应链和法务联合核实争议与付款安排，并设定反馈时间；现有数据无法证明存在断供风险。';
+  fact(`截至${s.cutoff}，广域建材控股已确认归并的应付余额${g.balance}万元，其中逾期未清${g.overdue}万元。`,['E-GROUP-G2',...g.items.map(r=>`E-AP-${r.id}`)]);
+  for(const r of g.items)fact(`${r.id}（合同${r.contract}）：登记到期${r.due||'待核'}，原始应付${r.amount}万元，已核销${r.paid}万元，剩余${r.balance}万元。`,[`E-CT-${r.id}`,`E-AP-${r.id}`]);
+  fact('AP003存在90万元争议登记，但未取得正式调整凭证，不能直接冲减应付。',['E-DIS-AP003','E-AP-AP003']);
+  fact('广域物资有限公司的供应商集团关系仍待核，没有进入已确认的广域建材归并金额。',['E-G02']);
+  openQuestions=['争议记录所依据的合同条款和处理结果尚未由原件确认。','没有供应商停供或生产影响的可信记录，不能将逾期推定为断供。','集团归口是否确有跨部门协调需要及反馈期限，需线下确认。'];
+  options=[{title:'联合核对争议与到期义务',consideration:'组织财资、供应链及必要时法务确认合同、结算和付款安排',risk:'需要提供合同及争议材料；不能承诺付款结果'},{title:'沿用原有归口督办',consideration:'保留现有处理机制并明确阶段反馈时间',risk:'跨部门争议可能继续无法闭合'}];
+ }else if(/^AP\d{3}$/.test(scope)){
+  const r=s.entries.find(x=>x.id===scope);if(!r)throw Error('not found');
+  title=`${r.supplier.name} · ${r.id} 付款事项`;
+  fact(`应付${r.id}（合同${r.contract}、结算${r.settlement}）原始金额${r.amount}万元；截至${s.cutoff}已核销${r.paid}万元、尚未结清${r.balance}万元。`,[`E-CT-${r.id}`,`E-AP-${r.id}`]);
+  fact(`登记到期日为${r.due||'未知'}；${r.days===null?'缺少到期条件，不能判断是否逾期':r.days>0?`截至日超出登记到期日${r.days}天，未清${r.overdue}万元`:r.days===0?'截至日为登记到期日':`距登记到期日还有${-r.days}天`}。`,[`E-CT-${r.id}`,`E-AP-${r.id}`]);
+  if(r.applied.length)for(const a of r.applied)fact(`${a.paymentId}于${a.payment.date}支付，按核销分配关联本应付${a.amount}万元。`,[`E-ALLOC-${r.id}-${a.paymentId}`]);
+  if(r.dispute)fact(`当前登记争议${r.dispute}万元，不代表已经核销或正式调整应付。`,[`E-DIS-${r.id}`]);
+  openQuestions=['合同原件、补充协议和付款条件尚未提供。','该笔记录是否需要提级，必须由集团业务归口确认。'];
+  management=`${general} 当前仅能核实${r.id}的账务、到期和核销事实。`;
+  owner='财资与供应链归口';
+ }else if(/^G\d+$/.test(scope)){
+  const g=s.groups.find(x=>x.id===scope);if(!g)throw Error('not found');
+  title=`${g.name} · 集团应付情况`;
+  fact(`截至${s.cutoff}，已确认归并应付${g.balance}万元、其中已逾期${g.overdue}万元，占当前集团应付${round1(g.balance/s.totals.balance*100)}%。`,[`E-GROUP-${g.id}`]);
+  for(const r of g.items){fact(`合同${r.contract}（${r.id}）：未清${r.balance}万元，其中逾期${r.overdue}万元。`,[`E-CT-${r.id}`,`E-AP-${r.id}`]);}
+  openQuestions=['供应商集团关系仅覆盖确认映射，未映射主体不能自动并入。','应付金额较高不等于财务异常，是否需要协调应结合争议和实际经营影响。'];
+  management=`${general} 本页汇总供应商未清金额，不能直接判断供应中断或付款优先级。`;
+  owner='集团财资与供应链';
+ }else if(scope==='COMPARE'){
+  const c=s.comparison;title='同类供应商付款安排对照';owner='集团财资与供应链';
+  for(const r of c.entries){
+   const entry=s.entries.find(x=>x.contract===r.contract);
+   fact(`${r.name}（${r.contract}）：到期${r.dueAmount}万元；截至日清偿${round1(r.clearance)}%，到期日按时支付${round1(r.punctual)}%，尚未清偿${r.balance}万元。`,[`E-CT-${entry.id}`,`E-AP-${entry.id}`,...entry.applied.map(a=>`E-ALLOC-${entry.id}-${a.paymentId}`)]);
+  }
+  openQuestions=['可比性目前使用样例合同条件，尚未经客户业务归口确认。','合同时间条款、历史支付有效日及特殊争议需核实；不能仅凭比例认定不公平。'];
+  management='付款差异默认是财资与供应链核查事项，未经确认不得直接列为集团一号位待决策事项。';
+ }else throw Error('invalid analysis scope');
+ return {scope,period,cutoff:s.cutoff,sourceVersion:DATA_VERSION,title,tier,owner,management,facts,evidence:catalog,openQuestions,options,sourceIds:[...new Set(facts.flatMap(f=>f.source_ids))]};
+}

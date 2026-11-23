@@ -1,24 +1,65 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import {snapshot,caseEvidence} from '../public/assets/business.mjs';
+import {snapshot,analysisContext,analysisScopes,evidenceCatalog} from '../public/assets/business.mjs';
 import {onRequestGet} from '../functions/api/health.js';
 import {onRequestPost,normalize} from '../functions/api/analyze.js';
-test('2026-11 group totals reconcile without joining unconfirmed supplier entity',()=>{
- const s=snapshot();assert.equal(s.totals.balance,3890);assert.equal(s.totals.overdue,2250);assert.equal(s.totals.unknown,500);assert.equal(s.totals.companyMapped,3650);assert.equal(s.totals.unmapped,240);assert.equal(s.totals.companyMapped+s.totals.unmapped,s.totals.balance);
+
+test('集团应付汇总与供应商归并余额勾稽',()=>{
+ const s=snapshot();assert.equal(s.totals.balance,3890);assert.equal(s.totals.overdue,2250);
+ assert.equal(s.totals.unknown,500);assert.equal(s.totals.companyMapped,3650);
+ assert.equal(s.totals.unmapped,240);assert.equal(s.totals.companyMapped+s.totals.unmapped,s.totals.balance);
 });
-test('one payment allocated to two separate payables, no accidental full subtraction',()=>{
- const rows=snapshot().entries;assert.equal(rows.find(x=>x.id==='AP003').paid,220);assert.equal(rows.find(x=>x.id==='AP004').paid,50);assert.equal(rows.find(x=>x.id==='AP005').paid,120);
+test('一笔支付可分配至两项应付，不会重复扣减',()=>{
+ const rows=snapshot().entries;
+ assert.equal(rows.find(x=>x.id==='AP003').paid,220);
+ assert.equal(rows.find(x=>x.id==='AP004').paid,50);
+ assert.equal(rows.find(x=>x.id==='AP005').paid,120);
 });
-test('timely paid and as-of clearance differ for comparison group',()=>{
- const c=snapshot().comparison;assert.equal(c.entries.length,3);assert.equal(c.valid,true);const s1=c.entries.find(x=>x.sid==='S01');assert.ok(s1.clearance>s1.punctual);const s5=c.entries.find(x=>x.sid==='S05');assert.equal(s5.clearance,100);assert.equal(s5.punctual,100);
+test('历史按时支付率与当前清偿率独立',()=>{
+ const c=snapshot().comparison;assert.equal(c.entries.length,3);assert.equal(c.valid,true);
+ assert.ok(c.entries.find(x=>x.sid==='S01').clearance>c.entries.find(x=>x.sid==='S01').punctual);
+ assert.equal(c.entries.find(x=>x.sid==='S05').punctual,100);
 });
-test('facts for AI are bound to known evidence references and unknowns',()=>{
- const packet=caseEvidence('L-001');assert.ok(packet.evidenceIds.includes('E-D03'));assert.ok(packet.facts.some(x=>x.includes('争议90万元')));
+test('针对任意已选应付、供应商集团、比较专题生成独立分析事实',()=>{
+ const scopes=analysisScopes();const ids=new Set(scopes.map(x=>x.id));assert.ok(ids.has('AP012'));
+ assert.ok(ids.has('G1'));assert.ok(ids.has('COMPARE'));
+ for(const sc of scopes){const ctx=analysisContext(sc.id);assert.ok(ctx.facts.length>0,sc.id);
+  for(const fact of ctx.facts){assert.ok(fact.source_ids.length);for(const id of fact.source_ids)assert.ok(ctx.evidence[id],id);}
+ }
+ const ap=analysisContext('AP012');assert.ok(ap.facts.some(f=>f.text.includes('AP012')));
+ assert.ok(!ap.facts.some(f=>f.text.includes('AP003')));
+ const group=analysisContext('G1');assert.ok(group.facts.every(f=>!f.text.includes('广域建材')));
+ assert.throws(()=>analysisContext('G999'));assert.throws(()=>analysisContext('AP999'));
 });
-test('server AI disabled without secrets; public entry never runs upstream',async()=>{
- const r=await onRequestPost({request:new Request('https://example.com/api/analyze',{method:'POST',body:'{}'}),env:{}});assert.equal(r.status,503);
- const h=onRequestGet({env:{}});assert.equal((await h.json()).available,false);
+test('分析上下文按统计期重算，不复用上月数字',()=>{
+ const now=analysisContext('AP001','2026-11'),past=analysisContext('AP001','2026-10');
+ assert.notDeepEqual(now.facts,past.facts);assert.equal(now.cutoff,'2026-11-20');assert.equal(past.cutoff,'2026-10-31');
+ const cat=evidenceCatalog('2026-11');assert.ok(cat['E-AP-AP001']);assert.ok(cat['E-ALLOC-AP003-PAY04']);
 });
-test('AI evidence normalization rejects invented evidence IDs',()=>{
- const x=normalize({title:'x',summary:'s',facts:[{text:'a',source_ids:['E-D03','FAKE-ID']}],unknowns:[],options:[],decisionQuestion:'q'},['E-D03']);assert.deepEqual(x.facts[0].source_ids,['E-D03']);
+test('服务端未配置时拒绝模型调用，不泄漏密钥',async()=>{
+ const r=await onRequestPost({request:new Request('https://example.com/api/analyze',{method:'POST',body:'{}'}),env:{}});
+ assert.equal(r.status,503);const h=onRequestGet({env:{}});assert.equal((await h.json()).available,false);
+});
+test('归档事实只接受已知 fact_id，不接受模型自行编造文本',()=>{
+ const ctx=analysisContext('AP001');const data=normalize({title:'测试',summary:'仅为模型待核摘要',fact_ids:[ctx.facts[0].id,'INVENTED'],unknowns:['待核'],options:[{title:'直接付款',consideration:'错误',risk:'错误'}],decisionQuestion:'命令付款'},ctx);
+ assert.equal(data.facts.length,1);assert.deepEqual(data.facts[0],ctx.facts[0]);
+ assert.equal(data.options.length,0);assert.equal(data.decisionQuestion,'');
+});
+test('不同所选对象的服务端模型请求携带不同证据包',async()=>{
+ const old=globalThis.fetch;const seen=[];
+ globalThis.fetch=async(_url,init)=>{
+  const body=JSON.parse(init.body);const request=JSON.parse(body.messages[1].content);
+  seen.push(request.referenceContext);
+  return new Response(JSON.stringify({choices:[{message:{content:JSON.stringify({title:'研判',summary:'待复核摘要',fact_ids:[request.referenceContext.canonicalFacts[0].id],unknowns:[],options:[],decisionQuestion:''})}}]}),{status:200});
+ };
+ try{
+  for(const scope of ['AP012','G1','COMPARE']){
+   const request=new Request('https://example.com/api/analyze',{method:'POST',headers:{'X-Demo-Passcode':'demo'},body:JSON.stringify({period:'2026-11',scope,prompt:'这项业务有什么需要注意？'})});
+   const r=await onRequestPost({request,env:{AI_ENABLED:'1',AI_API_KEY:'secret',AI_MODEL:'test',AI_DEMO_PASSCODE:'demo',AI_BASE_URL:'https://model.example/v1'}});
+   assert.equal(r.status,200);const out=await r.json();assert.equal(out.scope,scope);
+  }
+  assert.deepEqual(seen.map(x=>x.requestedScope),['AP012','G1','COMPARE']);
+  assert.ok(seen[0].canonicalFacts.some(x=>x.text.includes('AP012')));
+  assert.ok(!seen[1].canonicalFacts.some(x=>x.text.includes('AP012')));
+ }finally{globalThis.fetch=old;}
 });
