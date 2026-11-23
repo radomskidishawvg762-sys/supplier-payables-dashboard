@@ -41,19 +41,27 @@ function topicsPage(){const s=current(),groups=s.groups.filter(g=>g.balance>0),c
  section('同类付款对照','',button('分析付款差异','analyze:COMPARE','gold'))+
  `<div class="detail-panel"><details class="business-detail" data-expand="compare" ${state.expanded.compare?'open':''}><summary>展开付款对照清单 <span class="small muted">（${comp.entries.length} 家）</span></summary><div class="filter-strip"><span class="small muted">${esc(comp.condition)}</span><span class="spacer"></span>${badge(comp.valid?'3家独立供应商 · 候选可比组':'样本不足','gold')}</div><div class="table-scroll"><table class="data-table"><thead><tr><th>供应商</th><th>对应合同</th><th class="number">到期金额</th><th class="number">当前清偿比例</th><th class="number">按时付款比例</th><th>操作</th></tr></thead><tbody>${comp.entries.map(r=>`<tr><td>${esc(r.name)}</td><td>${esc(r.contract)}</td><td class="number">${money(r.dueAmount)}</td><td class="number">${percent(r.clearance)}</td><td class="number">${percent(r.punctual)}</td><td>${lnk('证据',`payable:${s.entries.find(x=>x.contract===r.contract)?.id}`)}</td></tr>`).join('')}</tbody></table></div><div class="facts-bar table-note">${esc(comp.note)}</div></details></div>`;
 }
-function actionsPage(){const drafts=state.drafts.filter(d=>d.period===state.period);return heading('协调进展','协调事项','管理意见与执行反馈',button('形成意见草稿','options:L-001','primary'))+
- `<div class="action-intro"><h2>${esc(leadershipCase.title)}</h2><p>本期需明确：${esc(leadershipCase.question)}</p><div class="lead-actions">${button('查看事实与不同路径','analyze:L-001')}${lnk('生成新草稿','prepare:0')}</div></div>`+
+function actionsPage(){const drafts=state.drafts.filter(d=>d.period===state.period);const last=drafts.at(-1);return heading('协调进展','协调事项','管理意见与执行反馈',last?button('修改本期意见',`edit-draft:${last.id}`,'primary'):button('形成意见草稿','options:L-001','primary'))+
+ `<div class="action-intro"><h2>${esc(leadershipCase.title)}</h2><p>本期需明确：${esc(leadershipCase.question)}</p><div class="lead-actions">${button('查看事实与不同路径','analyze:L-001')}${lnk(last?'修改本期意见':'形成意见草稿',last?`edit-draft:${last.id}`:'prepare:0')}</div></div>`+
  `<div class="actions-status"><div><span>本期意见记录</span><strong>${drafts.length} 项</strong></div><div><span>已反馈待复核</span><strong>${drafts.filter(d=>d.feedback?.length).length} 项</strong></div><div><span>正式确认</span><strong>以集团 OA 为准</strong></div></div>`+
- section('本期意见记录')+
- `<div class="action-records">${drafts.length?drafts.slice().reverse().map(d=>`<div class="record"><div class="record-top">${badge(d.feedback?.length?'已有业务反馈 · 待复核':'待正式确认',d.feedback?.length?'green':'gold')}<small>${esc(d.time)}</small></div><h3>${esc(d.title)}</h3><p><b>要求：</b>${esc(d.decision)}</p><p><b>归口：</b>${esc(d.owner)}　<b>反馈期限：</b>${esc(d.limit||'待明确')}</p>${d.feedback?.length?`<div class="feedback-list">${d.feedback.map(f=>`<div><b>${esc(f.time)} · ${esc(f.actor)}</b><p>${esc(f.text)}</p><small>${esc(f.evidence||'未附业务凭证')} · 未经正式复核</small></div>`).join('')}</div>`:''}<div class="record-controls">${button('登记新的执行反馈',`feedback:${d.id}`,'compact')}${lnk('回看原事项','analyze:L-001')}</div></div>`).join(''):'<div class="table-empty">本期暂无已保存的意见草稿。可先查看重大事项与依据，再形成记录。</div>'}</div>`;
+ section('本期意见记录','',drafts.length?lnk('清空本期草稿','reset-period-drafts'):'')+
+ `<div class="action-records">${drafts.length?drafts.slice().reverse().map(d=>`<div class="record"><div class="record-top">${badge(d.feedback?.length?'已有业务反馈 · 待复核':'待正式确认',d.feedback?.length?'green':'gold')}<small>${esc(d.time)}</small></div><h3>${esc(d.title)}</h3><p><b>要求：</b>${esc(d.decision)}</p><p><b>归口：</b>${esc(d.owner)}　<b>反馈期限：</b>${esc(d.limit||'待明确')}</p>${d.feedback?.length?`<div class="feedback-list">${d.feedback.map(f=>`<div><b>${esc(f.time)} · ${esc(f.actor)}</b><p>${esc(f.text)}</p><small>${esc(f.evidence||'未附业务凭证')} · 未经正式复核</small></div>`).join('')}</div>`:''}<div class="record-controls">${button('登记执行反馈',`feedback:${d.id}`,'compact')}${lnk('修改意见',`edit-draft:${d.id}`)}${lnk('删除草稿',`delete-draft:${d.id}`)}${lnk('回看原事项','analyze:L-001')}</div></div>`).join(''):'<div class="table-empty">本期暂无已保存的意见草稿。可先查看重大事项与依据，再形成记录。</div>'}</div>`;
 }
 function sourceCard(id){const e=catalog()[id];return e?`<div class="evidence"><div class="meta">${esc(e.type)} · ${esc(id)}</div><h4>${esc(e.label)}</h4><p>${esc(e.description)}</p><small class="muted">来源编号：${esc(e.sourceId||id)}</small></div>`:'';}
 function knownFacts(ctx,n=0){const f=n?ctx.facts.slice(0,n):ctx.facts;return `<div class="evidence-list">${f.map((x,i)=>`<div class="context-fact"><span class="record-index">${String(i+1).padStart(2,'0')}</span><div class="record-content"><div>${esc(x.text)}</div><div class="fact-source">${evidenceLinks(x.source_ids)}</div></div></div>`).join('')}</div>`;}
 function factFold(ctx){return `<details class="material-details"><summary>查看全部事实与来源记录 <span class="muted">${ctx.facts.length} 项</span></summary>${knownFacts(ctx)}</details>`;}
 function questionList(questions){return `<ul class="review-questions">${questions.slice(0,4).map(x=>`<li>${esc(x)}</li>`).join('')}</ul>`;}
+function starterQuestions(id){
+ if(id==='COMPARE')return ['哪些供应商之间具备可比条件？','付款进度差异主要来自哪些事实？','还有哪些重要条件尚未核实？'];
+ if(id.startsWith('AP'))return ['这笔应付目前还有多少未付？','已经有哪些实际付款和核销记录？','合同和争议资料能否解释逾期？'];
+ if(id.startsWith('G'))return ['这家供应商的应付和逾期是多少？','哪些合同构成主要应付余额？','哪些业务情况仍需要确认？'];
+ return ['这项应付问题为什么需要集团协调？','哪些金额与争议已有可靠依据？','下一步需要确认哪些经营事实？'];
+}
 function aiResponse(){
  const transcript=state.chatTurns.map(turn=>`<div class="dialogue-turn ${turn.role==='user'?'from-user':'from-model'}"><div class="dialogue-role">${turn.role==='user'?'提问':'答复'}</div><div class="dialogue-text">${esc(turn.content)}</div>${turn.role==='assistant'&&turn.facts?.length?`<details class="material-details answer-citations"><summary>查看本次引用的记录（${turn.facts.length}）</summary>${knownFacts({facts:turn.facts})}</details>`:''}</div>`).join('');
- return `<div class="dialogue-transcript" aria-live="polite">${transcript}${state.aiLoading?'<div class="dialogue-pending">正在生成回答…</div>':''}${state.aiError?`<div class="dialogue-error">${esc(state.aiError)}</div>`:''}</div>`;
+ const fresh=!state.chatTurns.length&&!state.aiLoading&&!state.aiError;
+ const starters=fresh?`<div class="dialogue-starters"><div class="starter-label">可以这样提问</div>${starterQuestions(state.focus).map(q=>`<button class="starter-question" data-suggest="${esc(q)}">${esc(q)}<span aria-hidden="true">↗</span></button>`).join('')}</div>`:'';
+ return `<div class="dialogue-transcript ${fresh?'is-empty':''}" aria-live="polite">${starters}${transcript}${state.aiLoading?'<div class="dialogue-pending">正在生成回答…</div>':''}${state.aiError?`<div class="dialogue-error">${esc(state.aiError)}</div>`:''}</div>`;
 }
 
 function drawer(){const d=state.drawer;if(!d)return '';let title='详情',html='';const s=current();
@@ -73,6 +81,8 @@ function drawer(){const d=state.drawer;if(!d)return '';let title='详情',html='
   const ctx=context('L-001');title='协调方式与条件';html=`<p>${esc(ctx.management)}</p><div class="option-grid">${ctx.options.map((o,i)=>`<div class="option-card"><h4>${esc(o.title)}</h4><p><b>预期作用：</b>${esc(o.consideration)}</p><p><b>前提与约束：</b>${esc(o.risk)}</p>${button('生成可编辑草稿','prepare:'+i,'compact primary')}</div>`).join('')}</div><div class="drawer-tail">${button('回看完整事实','analyze:L-001')}</div>`;
  }else if(d.type==='prepare'){
   const choice=context('L-001').options[d.index]||context('L-001').options[0];title='协调意见草稿';html=`<div class="form-field"><label for="draft-decision">需要落实的管理要求</label><textarea class="input textarea" id="draft-decision" maxlength="600">${esc(choice.title)}：请归口部门核实应付、付款安排与争议依据，并明确后续处理及反馈时间。</textarea></div><div class="form-field"><label for="draft-owner">业务归口</label><input class="input" id="draft-owner" maxlength="80" value="集团财资部、供应链管理部门"></div><div class="form-field"><label for="draft-limit">反馈时间或节点</label><input class="input" id="draft-limit" maxlength="80" placeholder="例如：下次经营分析会前"></div>${button('保存草稿','save-draft','primary')}`;
+ }else if(d.type==='edit-draft'){
+  const draft=state.drafts.find(x=>x.id===d.id);title='修改协调意见';html=draft?`<div class="form-field"><label for="draft-decision">管理要求</label><textarea class="input textarea" id="draft-decision" maxlength="600">${esc(draft.decision)}</textarea></div><div class="form-field"><label for="draft-owner">业务归口</label><input class="input" id="draft-owner" maxlength="80" value="${esc(draft.owner)}"></div><div class="form-field"><label for="draft-limit">反馈时间或节点</label><input class="input" id="draft-limit" maxlength="80" value="${esc(draft.limit||'')}"></div><div class="drawer-tail">${button('保存修改','update-draft','primary')}${lnk('取消','close')}</div>`:'记录不存在';
  }else if(d.type==='feedback'){
   const draft=state.drafts.find(x=>x.id===d.id);title='登记执行反馈';html=draft?`<p><b>${esc(draft.title)}</b></p><div class="form-field"><label for="feedback-actor">反馈人或反馈部门</label><input id="feedback-actor" class="input" maxlength="80" placeholder="例如：集团财资部"></div><div class="form-field"><label for="feedback-text">执行情况与剩余问题</label><textarea id="feedback-text" class="input textarea" maxlength="500" placeholder="填写实际已完成事项、尚未解决的问题和下一步节点"></textarea></div><div class="form-field"><label for="feedback-evidence">依据编号或凭证位置（可选）</label><input id="feedback-evidence" class="input" maxlength="120" placeholder="填写已有凭证编号，不上传敏感资料"></div>${button('保存反馈 · 待复核','save-feedback','primary')}`:'未找到记录';
  }else if(d.type==='report'){
@@ -95,7 +105,7 @@ function makePrintSheet(){let sheet=document.getElementById('print-sheet');if(!s
 function printReport(){makePrintSheet();window.print();}
 window.addEventListener('beforeprint',makePrintSheet);
 window.addEventListener('afterprint',()=>{document.getElementById('print-sheet')?.remove();});
-function render(){root.innerHTML=layout(state.page==='brief'?briefPage():state.page==='risks'?risksPage():state.page==='topics'?topicsPage():actionsPage());if(state.drawer?.type==='analysis'&&(state.chatTurns.length||state.aiLoading||state.aiError)){requestAnimationFrame(()=>{const drawer=document.querySelector('.drawer');if(drawer)drawer.scrollTop=drawer.scrollHeight;});}}
+function render(){root.innerHTML=layout(state.page==='brief'?briefPage():state.page==='risks'?risksPage():state.page==='topics'?topicsPage():actionsPage());if(state.drawer?.type==='analysis'){requestAnimationFrame(()=>{const transcript=document.querySelector('.dialogue-transcript');if(transcript)transcript.scrollTop=transcript.scrollHeight;});}}
 function openAnalysis(id){try{context(id)}catch{return alert('该对象当前无法分析')}state.focus=id;state.prompt='';state.aiResult=null;state.aiError='';state.chatTurns=[];state.drawer={type:'analysis',id};render();}
 async function checkAI(){try{const r=await fetch('/api/health',{cache:'no-store'});if(!r.ok)throw Error('offline');const data=await r.json();state.aiReady=data.available?'ready':'offline';}catch{state.aiReady='offline'}render();}
 async function doAI(){
@@ -121,6 +131,7 @@ async function doAI(){
 }
 
 document.addEventListener('click',async event=>{
+ const suggestion=event.target.closest('[data-suggest]');if(suggestion){const input=document.querySelector('#ai-prompt');if(input){input.value=suggestion.dataset.suggest;input.focus();}return;}
  const source=event.target.closest('[data-evidence]');if(source){state.drawer={type:'source',id:source.dataset.evidence};return render();}
  const nav=event.target.closest('[data-nav]');if(nav){state.page=nav.dataset.nav;state.drawer=null;return render();}
  const action=event.target.closest('[data-act]')?.dataset.act;if(!action){if(event.target.id==='drawer-mask'){state.drawer=null;render()}return;}
@@ -133,12 +144,19 @@ document.addEventListener('click',async event=>{
  else if(action.startsWith('options:'))state.drawer={type:'options'};
  else if(action.startsWith('prepare:'))state.drawer={type:'prepare',index:Number(action.slice(8))};
  else if(action.startsWith('feedback:'))state.drawer={type:'feedback',id:action.slice(9)};
+ else if(action.startsWith('edit-draft:'))state.drawer={type:'edit-draft',id:action.slice(11)};
+ else if(action.startsWith('delete-draft:')){const id=action.slice(13);const draft=state.drafts.find(x=>x.id===id&&x.period===state.period);if(!draft)return;if(!confirm('确定删除这条本地意见草稿及其反馈？删除后无法恢复。'))return;state.drafts=state.drafts.filter(x=>x.id!==id);save();state.drawer=null;return render();}
+ else if(action==='reset-period-drafts'){const count=state.drafts.filter(x=>x.period===state.period).length;if(!count)return;if(!confirm(`确定清空 ${state.period} 的 ${count} 条本地意见草稿及反馈？其他月份不会受影响。`))return;state.drafts=state.drafts.filter(x=>x.period!==state.period);save();state.drawer=null;return render();}
  else if(action==='report')state.drawer={type:'report'};
  else if(action==='generate-ai')return await doAI();
  else if(action==='clear-chat'){state.chatTurns=[];state.prompt='';state.aiError='';return render();}
  else if(action==='save-draft'){
   const decision=document.querySelector('#draft-decision')?.value?.trim(),owner=document.querySelector('#draft-owner')?.value?.trim(),limit=document.querySelector('#draft-limit')?.value?.trim();if(!decision||decision.length<12||!owner)return alert('请填写具体管理要求和归口部门');
-  state.drafts.push({id:`LOCAL-${Date.now()}`,caseId:'L-001',period:state.period,dataVersion:DATA_VERSION,title:leadershipCase.title,decision,owner,limit,status:'待正式确认',feedback:[],time:new Date().toLocaleString('zh-CN')});save();state.drawer=null;state.page='actions';return render();
+  const same=state.drafts.find(x=>x.period===state.period&&x.caseId==='L-001'&&x.decision===decision&&x.owner===owner&&x.limit===limit);if(same){state.drawer=null;state.page='actions';return render();}
+  if(state.drafts.some(x=>x.period===state.period&&x.caseId==='L-001')&&!confirm('本期已保存过这项协调意见。确定另存一条不同草稿吗？如需修改原意见，请使用「修改意见」。'))return;
+  state.drafts.push({id:`LOCAL-${Date.now()}-${Math.random().toString(36).slice(2,7)}`,caseId:'L-001',period:state.period,dataVersion:DATA_VERSION,title:leadershipCase.title,decision,owner,limit,status:'待正式确认',feedback:[],time:new Date().toLocaleString('zh-CN')});save();state.drawer=null;state.page='actions';return render();
+ }else if(action==='update-draft'){
+  const draft=state.drafts.find(x=>x.id===state.drawer?.id&&x.period===state.period);if(!draft)return alert('记录不存在');const decision=document.querySelector('#draft-decision')?.value?.trim(),owner=document.querySelector('#draft-owner')?.value?.trim(),limit=document.querySelector('#draft-limit')?.value?.trim();if(!decision||decision.length<12||!owner)return alert('请填写具体管理要求和归口部门');draft.decision=decision;draft.owner=owner;draft.limit=limit;draft.editedAt=new Date().toLocaleString('zh-CN');save();state.drawer=null;state.page='actions';return render();
  }else if(action==='save-feedback'){
   const record=state.drafts.find(d=>d.id===state.drawer?.id);if(!record)return alert('记录不存在');const actor=document.querySelector('#feedback-actor')?.value?.trim(),text=document.querySelector('#feedback-text')?.value?.trim(),evidence=document.querySelector('#feedback-evidence')?.value?.trim();if(!actor||!text||text.length<10)return alert('请填写反馈人和具体执行情况');record.feedback=record.feedback||[];record.feedback.push({actor,text,evidence,time:new Date().toLocaleString('zh-CN')});record.status='已有反馈 · 待正式复核';save();state.drawer=null;state.page='actions';return render();
  }else if(action==='print')return printReport();
