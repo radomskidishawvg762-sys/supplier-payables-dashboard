@@ -73,3 +73,39 @@ test('禁止来自其他站点的浏览器直接提交模型请求',async()=>{
  const response=await onRequestPost({request,env:{AI_ENABLED:'1',AI_API_KEY:'key',AI_MODEL:'test'}});
  assert.equal(response.status,403);
 });
+
+test('模型未返回 fact_ids 时仍保留系统事实，不捏造核实结果',()=>{
+ const ctx=analysisContext('AP001');
+ const parsed=normalize({summary:'结合登记记录，本事项需要核实付款条款与调整依据。'},ctx);
+ assert.ok(parsed.facts.length>0);
+ assert.equal(parsed.modelGenerated,true);
+ assert.ok(parsed.facts.every(f=>ctx.facts.some(x=>x.id===f.id)));
+});
+test('模型返回非 JSON 时安全降级为可追溯事实',async()=>{
+ const old=globalThis.fetch;
+ globalThis.fetch=async()=>new Response(JSON.stringify({choices:[{message:{content:'已核实所有问题，可以直接付款。'}}]}),{status:200});
+ try{
+  const r=await onRequestPost({request:new Request('https://example.com/api/analyze',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({period:'2026-11',scope:'AP001',prompt:'请说明这笔付款节点需要注意的问题？'})}),env:{AI_ENABLED:'1',AI_API_KEY:'redacted',AI_MODEL:'test',AI_BASE_URL:'https://example.com/v1'}});
+  const v=await r.json();assert.equal(r.status,200);assert.equal(v.analysis.degraded,true);assert.equal(v.analysis.modelGenerated,false);
+  assert.ok(!v.analysis.summary.includes('直接付款'));
+  assert.ok(v.analysis.facts.length>0);
+ }finally{globalThis.fetch=old;}
+});
+test('模型接口鉴权问题返回可理解的错误，而非结构检查失败',async()=>{
+ const old=globalThis.fetch;globalThis.fetch=async()=>new Response('{"error":{"message":"wrong key"}}',{status:401});
+ try{
+  const r=await onRequestPost({request:new Request('https://example.com/api/analyze',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({period:'2026-11',scope:'AP001',prompt:'请说明这笔付款节点需要注意的问题？'})}),env:{AI_ENABLED:'1',AI_API_KEY:'bad',AI_MODEL:'test',AI_BASE_URL:'https://example.com/v1'}});
+  const v=await r.json();assert.equal(r.status,502);assert.equal(v.code,'UPSTREAM_401');assert.match(v.error,/鉴权/);
+ }finally{globalThis.fetch=old;}
+});
+test('OpenAI 兼容接口不支持 JSON mode 时可回退普通文本模式',async()=>{
+ const old=globalThis.fetch;let calls=[];
+ globalThis.fetch=async(_url,init)=>{let body=JSON.parse(init.body);calls.push(body);
+  if(body.response_format)return new Response('{"error":{"message":"unsupported response_format"}}',{status:400});
+  const ctx=analysisContext('AP001');return new Response(JSON.stringify({choices:[{message:{content:JSON.stringify({summary:'根据应付明细需要核对到期条件。',fact_ids:[ctx.facts[0].id],unknowns:[]})}}]}),{status:200});
+ };
+ try{
+  const r=await onRequestPost({request:new Request('https://example.com/api/analyze',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({period:'2026-11',scope:'AP001',prompt:'请说明这笔付款节点需要注意的问题？'})}),env:{AI_ENABLED:'1',AI_API_KEY:'token',AI_MODEL:'test',AI_BASE_URL:'https://example.com/v1'}});
+  const v=await r.json();assert.equal(r.status,200);assert.equal(v.analysis.degraded,false);assert.equal(calls.length,2);assert.ok(calls[0].response_format);assert.ok(!calls[1].response_format);
+ }finally{globalThis.fetch=old;}
+});
