@@ -42,3 +42,6 @@ main{padding:34px 0 58px;min-height:calc(100vh - 200px)}.eyebrow{font-size:11px;
 @media(max-width:1050px){.lead-columns{grid-template-columns:1fr}.lead-decision{max-width:none}}
 @media(max-width:720px){.leadership-lead{padding:18px 20px}.leadership-lead h2{font-size:21px}.lead-metrics{display:grid;grid-template-columns:1fr 1fr;gap:8px}.lead-columns{gap:14px}.risk-leading{align-items:flex-start;flex-direction:column}.risk-leading-actions{flex-wrap:wrap}.thin-grid,.topic-leads{grid-template-columns:1fr}.follow-row{align-items:flex-start;flex-wrap:wrap}.context-query-actions{flex-wrap:wrap}}
 @media print{.context-query,.lead-actions,.record-controls,.risk-leading-actions{display:none!important}}
+
+/* Leadership pages keep operational ledgers available without showing them by default. */
+.business-detail>summary{cursor:pointer;padding:16px 20px;font-size:13px;font-weight:650;color:var(--green-dark);list-style:none;display:flex;align-items:center;gap:8px}.business-detail>summary::-webkit-details-marker{display:none}.business-detail>summary:before{content:"＋";font-size:15px;font-weight:500;color:var(--gold)}.business-detail[open]>summary{border-bottom:1px solid var(--line)}.business-detail[open]>summary:before{content:"−"}.business-detail>summary:hover{background:#f8faf6}.business-detail>summary .small{font-weight:400}.detail-panel{overflow:hidden}
