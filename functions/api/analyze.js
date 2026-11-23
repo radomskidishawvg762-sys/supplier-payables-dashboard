@@ -37,6 +37,15 @@ function extractModelJson(message){
  if(opening>=0&&closing>opening)return JSON.parse(cleanFence.slice(opening,closing+1));
  throw Error('invalid json');
 }
+// A greeting or a question about the assistant is not an accounts-payable analysis.
+// Routing it to the business-report schema was the reason ordinary dialogue
+// appeared to trigger the same supplier case repeatedly.
+export function isConversationPrompt(question){
+ const text=String(question??'').trim().replace(/[\s？！?，,。.!、：:；;~～]+/g,'').toLowerCase();
+ if(!text||text.length>70)return false;
+ if(/应付|供应商|付款|核销|合同|财务|逾期|账期|广域|金额|风险|协调|证据|报告/.test(text))return false;
+ return /^(你好|您好|嗨|哈喽|hello|hi|hey|早上好|下午好|晚上好|你是谁|你是|你能做什么|你会做什么|你可以做什么|介绍一下你自己|自我介绍|这个系统能做什么|这个应用能做什么)/i.test(text);
+}
 const providerErrorMessage=status=>status===400?'模型请求参数不兼容（HTTP 400），请检查接口与模型配置。':status===401||status===403?'模型服务鉴权失败，请核对 AI_API_KEY 与服务地域。':status===404?'模型名称或接口地址不匹配（HTTP 404）。':status===429?'模型接口已限流或额度不足（HTTP 429）。':status>=500?'模型服务暂时不可用（HTTP '+status+'）。':'模型服务调用失败（HTTP '+status+'）。';
 export async function onRequestPost({request,env}){
  if(env?.AI_ENABLED!=='1'||!env.AI_API_KEY||!env.AI_MODEL)return reply(503,{error:'智能分析服务未配置。现有事实和证据仍可正常查看。'});
@@ -45,10 +54,11 @@ export async function onRequestPost({request,env}){
  if(Number(request.headers.get('content-length')||0)>5000)return reply(413,{error:'请求内容过长。'});
  let body;try{body=await request.json()}catch{return reply(400,{error:'请求格式错误。'})}
  const period=clean(body?.period,12),scope=clean(body?.scope,32),prompt=clean(body?.prompt,300);
- if(!['2026-10','2026-11'].includes(period)||prompt.length<5||prompt.length>260)return reply(400,{error:'请选择有效的数据期间并填写具体问题。'});
+ if(!['2026-10','2026-11'].includes(period)||prompt.length<1||prompt.length>260)return reply(400,{error:'请选择有效的数据期间并填写具体问题。'});
  let context;try{context=analysisContext(scope,period)}catch{return reply(400,{error:'所选分析对象不存在。'})}
  const base=clean(env.AI_BASE_URL||'https://api.openai.com/v1',260).replace(/\/+$/,'');
  let url;try{url=new URL(base);if(url.protocol!=='https:')throw Error('insecure');}catch{return reply(500,{error:'AI 服务地址必须使用 HTTPS。'})}
+ const isConversation=isConversationPrompt(prompt);
  const referenceContext={
   requestedScope:scope,period,cutoff:context.cutoff,version:DATA_VERSION,title:context.title,tier:context.tier,
   canonicalFacts:context.facts,unknowns:context.openQuestions,leadershipBoundary:context.management,
@@ -59,15 +69,25 @@ export async function onRequestPost({request,env}){
  const controller=new AbortController(),timeout=setTimeout(()=>controller.abort(),35000);
  try{
   const endpoint=url.toString().replace(/\/$/,'')+'/chat/completions';
-  const payload={model:env.AI_MODEL,temperature:0.1,max_tokens:1800,response_format:{type:'json_object'},messages:[{role:'system',content:system},{role:'user',content:JSON.stringify({question:prompt,referenceContext})}]};
+  const payload=isConversation
+   ? {model:env.AI_MODEL,temperature:0.4,max_tokens:350,messages:[
+       {role:'system',content:'你是中建西部建设集团应付经营工作台内的智能分析助手。用户在问候、询问你的身份或功能时，直接自然回答用户的提问，通常两三句话即可。不要主动插入任何供应商、合同、金额、风险、协调意见或其他案例；不要装作读取了未查询的业务材料。回答使用简洁自然的中文纯文本，不要 JSON。'},
+       {role:'user',content:prompt}
+     ]}
+   : {model:env.AI_MODEL,temperature:0.1,max_tokens:1800,response_format:{type:'json_object'},messages:[{role:'system',content:system},{role:'user',content:JSON.stringify({question:prompt,referenceContext})}]};
   // Alibaba Cloud DeepSeek V4 hybrid models require non-thinking mode for JSON Object responses.
   if(/^deepseek-v4/i.test(env.AI_MODEL))payload.enable_thinking=false;
   const call=body=>fetch(endpoint,{method:'POST',signal:controller.signal,headers:{Authorization:`Bearer ${env.AI_API_KEY}`,'Content-Type':'application/json'},body:JSON.stringify(body)});
   let response=await call(payload);
   // Some OpenAI-compatible gateways do not implement JSON mode.
-  if(response.status===400){const issue=(await response.clone().text()).slice(0,1000);if(/response_format|json_object|enable_thinking|unsupported/i.test(issue)){const {response_format,enable_thinking,...compatible}=payload;response=await call(compatible);}}
+  if(response.status===400&&!isConversation){const issue=(await response.clone().text()).slice(0,1000);if(/response_format|json_object|enable_thinking|unsupported/i.test(issue)){const {response_format,enable_thinking,...compatible}=payload;response=await call(compatible);}}
   if(!response.ok){const issue=(await response.text()).slice(0,600);console.warn('AI upstream failure',response.status,issue.replace(/sk-[\w-]{8,}/g,'[redacted]'));return reply(502,{code:'UPSTREAM_'+response.status,error:providerErrorMessage(response.status)});}
   const raw=await response.json();const message=raw?.choices?.[0]?.message?.content;
+  if(isConversation){
+   const content=typeof message==='string'?message.trim():Array.isArray(message)?message.map(x=>x?.text||'').join('').trim():'';
+   if(!content)return reply(502,{error:'模型没有返回可显示的回答，请重新提问。',code:'EMPTY_REPLY'});
+   return reply(200,{analysis:{mode:'conversation',title:'对话',summary:clean(content,1000),facts:[],unknowns:[],options:[],decisionQuestion:'',sourceVersion:context.sourceVersion,period:context.period,scope:context.scope,modelGenerated:true,degraded:false},scope:context.scope,period:context.period,sourceVersion:context.sourceVersion});
+  }
   let analysis;
   try{analysis=normalize(extractModelJson(message),context)}catch(error){
    console.warn('AI structure fallback',String(error?.message||error));
