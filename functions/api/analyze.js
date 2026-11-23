@@ -25,9 +25,9 @@ export function normalize(parsed,context){
  };
 }
 export async function onRequestPost({request,env}){
- if(env?.AI_ENABLED!=='1'||!env.AI_API_KEY||!env.AI_MODEL||!env.AI_DEMO_PASSCODE)return reply(503,{error:'智能分析服务未配置。现有事实和证据仍可正常查看。'});
- const passcode=request.headers.get('X-Demo-Passcode')||'';
- if(!passcode||passcode.length>180||passcode!==env.AI_DEMO_PASSCODE)return reply(401,{error:'访问口令无效。'});
+ if(env?.AI_ENABLED!=='1'||!env.AI_API_KEY||!env.AI_MODEL)return reply(503,{error:'智能分析服务未配置。现有事实和证据仍可正常查看。'});
+ const origin=request.headers.get('Origin');if(origin){try{if(new URL(origin).origin!==new URL(request.url).origin)return reply(403,{error:'仅支持从本站提交分析请求。'});}catch{return reply(403,{error:'请求来源不可识别。'});}}
+ if(request.headers.get('Content-Type')&&!request.headers.get('Content-Type').includes('application/json'))return reply(415,{error:'仅支持JSON请求。'});
  if(Number(request.headers.get('content-length')||0)>5000)return reply(413,{error:'请求内容过长。'});
  let body;try{body=await request.json()}catch{return reply(400,{error:'请求格式错误。'})}
  const period=clean(body?.period,12),scope=clean(body?.scope,32),prompt=clean(body?.prompt,300);
@@ -44,7 +44,7 @@ export async function onRequestPost({request,env}){
  const system=`你是集团应付事项的严谨资料分析员，读者仅为集团一号位、二号位。基于提供的当前对象与材料回答，不能切换到其他对象。金额、日期和已知事实只能从canonicalFacts选取，不得推断财务风险损失、供应中断或法律结论。正文不要使用“已经确认”来修饰模型自己生成的内容；资料中的合同字段并非已取得原件。请列出当前事实、意义（如无证据说明不能判定）、待核问题。只在allowLeadershipDecision=true时给出两种组织协调选项；否则仅做事实分析并说明属于业务部门核查，不得要求董事长审批付款。只输出合法JSON对象：title字符串、summary字符串、fact_ids数组(仅使用提供的canonicalFacts里的id)、unknowns字符串数组、options数组(每项title/consideration/risk)、decisionQuestion字符串。简洁、客观、具体，无口号。`;
  const controller=new AbortController(),timeout=setTimeout(()=>controller.abort(),18000);
  try{
-  const response=await fetch(url.toString().replace(/\/$/,'')+'/chat/completions',{method:'POST',signal:controller.signal,headers:{Authorization:`Bearer ${env.AI_API_KEY}`,'Content-Type':'application/json'},body:JSON.stringify({model:env.AI_MODEL,temperature:0.1,max_tokens:1100,messages:[{role:'system',content:system},{role:'user',content:JSON.stringify({question:prompt,referenceContext})}]})});
+  const response=await fetch(url.toString().replace(/\/$/,'')+'/chat/completions',{method:'POST',signal:controller.signal,headers:{Authorization:`Bearer ${env.AI_API_KEY}`,'Content-Type':'application/json'},body:JSON.stringify({model:env.AI_MODEL,temperature:0.1,max_tokens:850,messages:[{role:'system',content:system},{role:'user',content:JSON.stringify({question:prompt,referenceContext})}]})});
   if(!response.ok)return reply(502,{error:'模型服务调用失败。请检查模型接口、额度和配置。'});
   const raw=await response.json();const message=raw?.choices?.[0]?.message?.content;
   if(typeof message!=='string')throw Error('empty');
