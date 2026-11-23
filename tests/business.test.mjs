@@ -109,3 +109,37 @@ test('OpenAI 兼容接口不支持 JSON mode 时可回退普通文本模式',asy
   const v=await r.json();assert.equal(r.status,200);assert.equal(v.analysis.degraded,false);assert.equal(calls.length,2);assert.ok(calls[0].response_format);assert.ok(!calls[1].response_format);
  }finally{globalThis.fetch=old;}
 });
+
+test('普通问候走真实模型自然对话，不携带固定应付事实包',async()=>{
+ const {isConversationPrompt}=await import('../functions/api/analyze.js');
+ assert.equal(isConversationPrompt('你好？你是？'),true);
+ assert.equal(isConversationPrompt('你是谁？'),true);
+ assert.equal(isConversationPrompt('这笔应付为什么逾期？'),false);
+ const old=globalThis.fetch;const seen=[];
+ globalThis.fetch=async(_url,init)=>{
+  const req=JSON.parse(init.body);seen.push(req);
+  return new Response(JSON.stringify({choices:[{message:{content:'你好，我是集团应付工作台的分析助手，可以帮你查阅付款情况和相关依据。'}}]}),{status:200});
+ };
+ try{
+  const request=new Request('https://test.example/api/analyze',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({period:'2026-11',scope:'L-001',prompt:'你好？你是？'})});
+  const response=await onRequestPost({request,env:{AI_ENABLED:'1',AI_API_KEY:'key',AI_MODEL:'deepseek-v4.1-flash',AI_BASE_URL:'https://example.org/v1'}});
+  assert.equal(response.status,200);const payload=await response.json();
+  assert.equal(payload.analysis.mode,'conversation');
+  assert.match(payload.analysis.summary,/你好/);
+  assert.deepEqual(payload.analysis.facts,[]);
+  assert.equal(seen[0].messages[1].content,'你好？你是？');
+  assert.equal('response_format' in seen[0],false);
+  assert.equal(seen[0].enable_thinking,false);
+  assert.ok(!JSON.stringify(seen[0]).includes('AP003'));
+ }finally{globalThis.fetch=old;}
+});
+
+test('普通问候失败时明确失败，不能拿固定合同分析冒充模型回复',async()=>{
+ const old=globalThis.fetch;
+ globalThis.fetch=async()=>new Response(JSON.stringify({choices:[{message:{content:''}}]}),{status:200});
+ try{
+  const request=new Request('https://test.example/api/analyze',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({period:'2026-11',scope:'L-001',prompt:'你是谁？'})});
+  const response=await onRequestPost({request,env:{AI_ENABLED:'1',AI_API_KEY:'key',AI_MODEL:'test',AI_BASE_URL:'https://example.org/v1'}});
+  assert.equal(response.status,502);const result=await response.json();assert.equal(result.code,'EMPTY_REPLY');
+ }finally{globalThis.fetch=old;}
+});
