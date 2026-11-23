@@ -3,7 +3,7 @@ import {snapshot,analysisContext,analysisScopes,evidenceCatalog,leadershipCase,f
 const root=document.querySelector('#app');
 const STORE='cscec-payables-leadership-v11';
 let restored={};try{restored=JSON.parse(localStorage.getItem(STORE)||'{}')||{}}catch{}
-const state={page:'brief',period:'2026-11',drawer:null,focus:'L-001',prompt:'',aiReady:'checking',aiLoading:false,aiError:'',aiResult:null,sort:'days',expanded:{risks:false,groups:false,compare:false},drafts:Array.isArray(restored.drafts)?restored.drafts:[],search:'',periodOptions:Object.keys(REPORTING_DATES)};
+const state={page:'brief',period:'2026-11',drawer:null,focus:'L-001',prompt:'',aiReady:'checking',aiLoading:false,aiError:'',aiResult:null,chatTurns:[],sort:'days',expanded:{risks:false,groups:false,compare:false},drafts:Array.isArray(restored.drafts)?restored.drafts:[],search:'',periodOptions:Object.keys(REPORTING_DATES)};
 const menu=[['brief','经营概览'],['risks','重点风险'],['topics','经营专题'],['actions','协调进展']];
 const esc=s=>String(s??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 const money=n=>formatMoney(n)+' 万元';
@@ -52,19 +52,15 @@ function knownFacts(ctx,n=0){const f=n?ctx.facts.slice(0,n):ctx.facts;return `<d
 function factFold(ctx){return `<details class="material-details"><summary>查看全部事实与来源记录 <span class="muted">${ctx.facts.length} 项</span></summary>${knownFacts(ctx)}</details>`;}
 function questionList(questions){return `<ul class="review-questions">${questions.slice(0,4).map(x=>`<li>${esc(x)}</li>`).join('')}</ul>`;}
 function aiResponse(){
- if(state.aiLoading)return `<div class="analysis-wait">正在核对相关材料并组织分析结果……</div>`;
- if(state.aiError)return `<div class="analysis-error"><b>分析未完成</b><p>${esc(state.aiError)}</p></div>`;
- const a=state.aiResult;if(!a)return '';
- if(a.mode==='conversation')return `<section class="conversation-answer" aria-live="polite"><div class="conversation-answer-head">答复</div><p>${esc(a.summary)}</p></section>`;
- return `<section class="analysis-result" aria-live="polite"><div class="analysis-result-head"><span>${a.degraded?'参考资料':'综合分析'}</span>${a.degraded?badge('可重试','gold'):''}</div><p class="analysis-summary">${esc(a.summary)}</p>${a.decisionQuestion?`<div class="result-decision"><b>建议明确</b><p>${esc(a.decisionQuestion)}</p></div>`:''}${a.options?.length?`<h4>可讨论的协调方式</h4><div class="result-options">${a.options.map(o=>`<article><b>${esc(o.title)}</b><p>${esc(o.consideration)}</p><small>条件与约束：${esc(o.risk)}</small></article>`).join('')}</div>`:''}${a.unknowns.length?`<h4>有待进一步确认</h4>${questionList(a.unknowns)}`:''}<details class="material-details"><summary>本次引用的事实与出处 <span class="muted">${a.facts.length} 项</span></summary>${knownFacts({facts:a.facts})}</details></section>`;
+ const transcript=state.chatTurns.map(turn=>`<div class="dialogue-turn ${turn.role==='user'?'from-user':'from-model'}"><div class="dialogue-role">${turn.role==='user'?'提问':'答复'}</div><div class="dialogue-text">${esc(turn.content)}</div>${turn.role==='assistant'&&turn.facts?.length?`<details class="material-details answer-citations"><summary>查看本次引用的记录（${turn.facts.length}）</summary>${knownFacts({facts:turn.facts})}</details>`:''}</div>`).join('');
+ return `<div class="dialogue-transcript" aria-live="polite">${transcript}${state.aiLoading?'<div class="dialogue-pending">正在生成回答…</div>':''}${state.aiError?`<div class="dialogue-error">${esc(state.aiError)}</div>`:''}</div>`;
 }
 
 function drawer(){const d=state.drawer;if(!d)return '';let title='详情',html='';const s=current();
  if(d.type==='analysis'){
-  const ctx=context(d.id);title=state.aiResult?.mode==='conversation'?'咨询':'事项分析 · '+ctx.title;
-  if(state.aiResult?.mode==='conversation'){
-   html=`<div class="dialogue-head"><h3>业务咨询</h3><p>可询问应付情况、合同和付款记录，也可以直接提出一般问题。</p></div><div class="analysis-query"><label class="field-heading" for="ai-prompt">你的问题</label><textarea class="ai-input" id="ai-prompt" maxlength="260" aria-label="提出问题">${esc(state.prompt)}</textarea><div class="context-query-actions">${button('重新提问','generate-ai','primary')}</div>${aiResponse()}</div>`;
-  }else html=`<div class="analysis-context"><div class="analysis-meta">${badge(ctx.tier,'gold')}<span>${esc(ctx.cutoff)} · ${esc(ctx.sourceVersion)}</span></div><span class="analysis-kicker">本事项需要关注什么</span><p class="analysis-focus">${esc(ctx.management)}</p></div><div class="analysis-section"><div class="analysis-section-title"><h3>关键事实</h3></div>${knownFacts(ctx,Math.min(2,ctx.facts.length))}${ctx.facts.length>2?factFold(ctx):''}</div><div class="analysis-section"><div class="analysis-section-title"><h3>仍需明确</h3></div>${questionList(ctx.openQuestions)}</div><div class="analysis-section analysis-query"><div class="analysis-section-title"><h3>进一步研判</h3>${badge(state.aiReady==='ready'?'服务可用':state.aiReady==='checking'?'正在连接':'未配置模型服务',state.aiReady==='ready'?'green':'')}</div><label class="field-heading" for="ai-prompt">分析问题</label><textarea class="ai-input" id="ai-prompt" maxlength="260" aria-label="针对当前事项提问">${esc(state.prompt)}</textarea><div class="context-query-actions">${button(state.aiLoading?'正在分析…':'生成分析','generate-ai','primary')}</div>${aiResponse()}</div>`;
+  const ctx=context(d.id);title='咨询 · '+ctx.title;
+  html=`<div class="dialogue-context"><div><strong>${esc(ctx.title)}</strong><span>${esc(ctx.cutoff)} · ${esc(state.period)}</span></div><details class="material-details"><summary>查看关联业务资料（${ctx.facts.length}项）</summary>${knownFacts(ctx)}</details></div>
+   <div class="dialogue-workspace">${aiResponse()}<div class="dialogue-composer"><label for="ai-prompt">请输入你的问题</label><textarea class="ai-input" id="ai-prompt" maxlength="1000" placeholder="可直接提问，也可以围绕当前事项继续追问。" aria-label="输入业务问题">${esc(state.prompt)}</textarea><div class="dialogue-toolbar"><span>${state.aiReady==='ready'?'已连接分析服务':state.aiReady==='checking'?'正在连接服务':'分析服务不可用'}</span>${state.chatTurns.length?lnk('清空对话','clear-chat'):''}${button(state.aiLoading?'正在生成…':'发送','generate-ai','primary')}</div></div></div>`;
  }else if(d.type==='source'){
   title='来源记录';html=`${sourceCard(d.id)}`;
  }else if(d.type==='evidence'){
@@ -99,10 +95,30 @@ function makePrintSheet(){let sheet=document.getElementById('print-sheet');if(!s
 function printReport(){makePrintSheet();window.print();}
 window.addEventListener('beforeprint',makePrintSheet);
 window.addEventListener('afterprint',()=>{document.getElementById('print-sheet')?.remove();});
-function render(){root.innerHTML=layout(state.page==='brief'?briefPage():state.page==='risks'?risksPage():state.page==='topics'?topicsPage():actionsPage());}
-function openAnalysis(id){try{context(id)}catch{return alert('该对象当前无法分析')}state.focus=id;state.prompt=id==='L-001'?'该事项为什么需要集团协调？还有哪些关键事实未确认？':id==='COMPARE'?'这组付款对照反映了哪些事实？哪些不能得出公平性结论？':id.startsWith('AP')?'请说明这笔应付的付款、核销和逾期事实，以及仍需核实什么？':'这家供应商的集团应付有哪些值得关注的事实？是否需要集团介入？';state.aiResult=null;state.aiError='';state.drawer={type:'analysis',id};render();}
+function render(){root.innerHTML=layout(state.page==='brief'?briefPage():state.page==='risks'?risksPage():state.page==='topics'?topicsPage():actionsPage());if(state.drawer?.type==='analysis'&&(state.chatTurns.length||state.aiLoading||state.aiError)){requestAnimationFrame(()=>{const drawer=document.querySelector('.drawer');if(drawer)drawer.scrollTop=drawer.scrollHeight;});}}
+function openAnalysis(id){try{context(id)}catch{return alert('该对象当前无法分析')}state.focus=id;state.prompt='';state.aiResult=null;state.aiError='';state.chatTurns=[];state.drawer={type:'analysis',id};render();}
 async function checkAI(){try{const r=await fetch('/api/health',{cache:'no-store'});if(!r.ok)throw Error('offline');const data=await r.json();state.aiReady=data.available?'ready':'offline';}catch{state.aiReady='offline'}render();}
-async function doAI(){if(state.aiLoading)return;const val=document.querySelector('#ai-prompt')?.value?.trim()||'';state.prompt=val;if(!val)return alert('请输入问题');if(state.aiReady!=='ready'){state.aiError='分析服务未启用。请检查 Cloudflare 服务端配置。';return render();}state.aiLoading=true;state.aiError='';state.aiResult=null;render();try{const resp=await fetch('/api/analyze',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({scope:state.focus,period:state.period,prompt:val})});const result=await resp.json().catch(()=>({error:'服务器返回内容无法解析'}));if(!resp.ok)throw Error(result.error||`请求失败 ${resp.status}`);if(result.scope!==state.focus||result.period!==state.period||result.sourceVersion!==DATA_VERSION)throw Error('分析结果的对象或数据版本不一致');state.aiResult=result.analysis;}catch(e){state.aiError=e.message||'分析失败'}finally{state.aiLoading=false;render()}}
+async function doAI(){
+ if(state.aiLoading)return;
+ const prompt=document.querySelector('#ai-prompt')?.value?.trim()||'';
+ if(!prompt)return alert('请先输入问题');
+ state.prompt=prompt;
+ if(state.aiReady!=='ready'){state.aiError='分析服务暂不可用。';render();return;}
+ const scope=state.focus,period=state.period;
+ const history=state.chatTurns.map(({role,content})=>({role,content})).slice(-8);
+ state.aiLoading=true;state.aiError='';render();
+ try{
+  const resp=await fetch('/api/analyze',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({scope,period,prompt,history})});
+  const result=await resp.json().catch(()=>({error:'模型服务返回格式错误'}));
+  if(!resp.ok)throw Error(result.error||`请求失败 (${resp.status})`);
+  if(result.scope!==scope||result.period!==period||result.sourceVersion!==DATA_VERSION)throw Error('响应对应的数据版本已变化，请重试。');
+  if(!result.analysis?.modelGenerated||!result.analysis?.summary)throw Error('模型没有返回有效回答，请重试。');
+  if(scope!==state.focus||period!==state.period)return;
+  state.chatTurns.push({role:'user',content:prompt},{role:'assistant',content:result.analysis.summary,facts:result.analysis.facts||[]});
+  state.prompt='';state.aiResult=result.analysis;
+ }catch(e){if(scope===state.focus&&period===state.period)state.aiError=e.message||'模型请求失败。';}
+ finally{state.aiLoading=false;render();}
+}
 
 document.addEventListener('click',async event=>{
  const source=event.target.closest('[data-evidence]');if(source){state.drawer={type:'source',id:source.dataset.evidence};return render();}
@@ -119,6 +135,7 @@ document.addEventListener('click',async event=>{
  else if(action.startsWith('feedback:'))state.drawer={type:'feedback',id:action.slice(9)};
  else if(action==='report')state.drawer={type:'report'};
  else if(action==='generate-ai')return await doAI();
+ else if(action==='clear-chat'){state.chatTurns=[];state.prompt='';state.aiError='';return render();}
  else if(action==='save-draft'){
   const decision=document.querySelector('#draft-decision')?.value?.trim(),owner=document.querySelector('#draft-owner')?.value?.trim(),limit=document.querySelector('#draft-limit')?.value?.trim();if(!decision||decision.length<12||!owner)return alert('请填写具体管理要求和归口部门');
   state.drafts.push({id:`LOCAL-${Date.now()}`,caseId:'L-001',period:state.period,dataVersion:DATA_VERSION,title:leadershipCase.title,decision,owner,limit,status:'待正式确认',feedback:[],time:new Date().toLocaleString('zh-CN')});save();state.drawer=null;state.page='actions';return render();
@@ -131,7 +148,7 @@ document.addEventListener('click',async event=>{
 document.addEventListener('toggle',event=>{const target=event.target;if(target.matches?.('details[data-expand]'))state.expanded[target.dataset.expand]=target.open;},true);
 document.addEventListener('change',event=>{
  if(event.target.id==='risk-sort'){state.sort=event.target.value;render();}
- if(event.target.id==='period-select'){state.period=event.target.value;state.drawer=null;state.aiResult=null;state.aiError='';render();}
+ if(event.target.id==='period-select'){state.period=event.target.value;state.drawer=null;state.aiResult=null;state.aiError='';state.chatTurns=[];render();}
 });
 document.addEventListener('keydown',event=>{if(event.key==='Escape'&&state.drawer){state.drawer=null;render();}});
 render();checkAI();
